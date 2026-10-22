@@ -18,7 +18,7 @@ Al conectar, `voy` entra a la sesión tmux `voy` del servidor (la crea si no exi
 ## Instalación
 
 ```bash
-git clone https://github.com/<usuario>/voy.git
+git clone https://github.com/grupoprioridad/voy.git
 cd voy
 ./install.sh
 ```
