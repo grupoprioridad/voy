@@ -1,0 +1,4 @@
+# nombre  usuario@host[:puerto]  descripción opcional
+# ejemplo:
+# casa     usuario@192.168.1.10:22     PC de la casa
+# vps      deploy@ejemplo.com:2222     Servidor web

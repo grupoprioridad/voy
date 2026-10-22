@@ -1,0 +1,138 @@
+#!/bin/bash
+# voy — conexiones SSH con tmux persistente.
+#
+#   voy               elegir servidor con fzf y conectarse
+#   voy <nombre>      conectarse directo a ese servidor
+#   voy add           agregar un servidor
+#   voy rm [nombre]   eliminar un servidor
+#   voy edit          abrir la lista en el editor
+#   voy ls            listar servidores
+#
+# Lista: ~/.config/voy/servers, una línea por servidor:
+#   nombre  usuario@host[:puerto]  descripción opcional
+
+set -uo pipefail
+
+SERVERS="${XDG_CONFIG_HOME:-$HOME/.config}/voy/servers"
+SESSION="voy"
+
+die() { echo "voy: $*" >&2; exit 1; }
+
+ensure_file() {
+  [[ -f $SERVERS ]] && return
+  mkdir -p "$(dirname "$SERVERS")"
+  cat >"$SERVERS" <<'EOF'
+# nombre  usuario@host[:puerto]  descripción opcional
+# ejemplo:
+# omarchy  usuario@192.168.1.10:22  PC de la casa
+EOF
+}
+
+# Servidores sin comentarios ni líneas vacías
+entries() {
+  ensure_file
+  grep -vE '^\s*(#|$)' "$SERVERS"
+}
+
+names() { entries | awk '{print $1}'; }
+
+find_entry() { entries | awk -v n="$1" '$1 == n {print; exit}'; }
+
+pick() {
+  local query=${1:-} prompt=${2:-"voy › "}
+  entries | column -t -l 3 |
+    fzf --height=~50% --layout=reverse --border=rounded --prompt="$prompt" \
+      --query="$query" --select-1 --exit-0 --no-multi |
+    awk '{print $1}'
+}
+
+connect() {
+  local entry target host port name
+  entry=$(find_entry "$1")
+  [[ -n $entry ]] || die "no existe el servidor '$1' (usa: voy ls)"
+  name=$(awk '{print $1}' <<<"$entry")
+  target=$(awk '{print $2}' <<<"$entry")
+  host=${target%:*}
+  port=22
+  [[ $target == *:* ]] && port=${target##*:}
+
+  printf '\e]0;voy › %s\a' "$name"
+  echo "→ $name ($host:$port)"
+  # Entra a la sesión tmux "voy" (la crea si no existe); sin tmux, abre un shell normal
+  exec ssh -t -p "$port" "$host" \
+    "command -v tmux >/dev/null && exec tmux new-session -A -s $SESSION || { echo 'voy: tmux no está instalado en el servidor, abriendo shell normal'; exec \$SHELL -l; }"
+}
+
+cmd_add() {
+  local name host user port desc
+  read -rp "Nombre (sin espacios): " name
+  [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || die "nombre inválido"
+  [[ -z $(find_entry "$name") ]] || die "'$name' ya existe"
+  case $name in add | rm | edit | ls | help) die "'$name' es un comando de voy, usa otro nombre" ;; esac
+  read -rp "Host o IP: " host
+  [[ -n $host ]] || die "falta el host"
+  read -rp "Usuario [$USER]: " user
+  read -rp "Puerto [22]: " port
+  read -rp "Descripción (opcional): " desc
+  user=${user:-$USER}
+  port=${port:-22}
+  [[ $port =~ ^[0-9]+$ ]] || die "puerto inválido"
+  ensure_file
+  printf '%s  %s@%s:%s  %s\n' "$name" "$user" "$host" "$port" "$desc" >>"$SERVERS"
+  echo "✓ agregado: $name → $user@$host:$port"
+
+  # Instala la llave pública para no volver a escribir la contraseña del servidor
+  local key="$HOME/.ssh/id_ed25519.pub" answer
+  if [[ -f $key ]]; then
+    read -rp "¿Copiar tu llave SSH a $name? (pedirá la contraseña del servidor una vez) [S/n] " answer
+    [[ $answer == [nN]* ]] || ssh-copy-id -i "$key" -p "$port" "$user@$host"
+  else
+    echo "Aún no tienes llave SSH (~/.ssh/id_ed25519); créala con: ssh-keygen -t ed25519"
+  fi
+}
+
+cmd_rm() {
+  local name=${1:-} answer
+  [[ -n $name ]] || name=$(pick "" "eliminar › ")
+  [[ -n $name ]] || exit 0
+  [[ -n $(find_entry "$name") ]] || die "no existe el servidor '$name'"
+  read -rp "¿Eliminar '$name'? [s/N] " answer
+  [[ $answer == [sSyY]* ]] || exit 0
+  local tmp
+  tmp=$(mktemp)
+  awk -v n="$name" '$1 != n || /^\s*#/' "$SERVERS" >"$tmp" && mv "$tmp" "$SERVERS"
+  echo "✓ eliminado: $name"
+}
+
+cmd_ls() {
+  local list
+  list=$(entries)
+  [[ -n $list ]] || { echo "No hay servidores. Agrega uno con: voy add"; return; }
+  column -t -l 3 <<<"$list"
+}
+
+case "${1:-}" in
+  "")
+    [[ -n $(entries) ]] || die "no hay servidores, agrega uno con: voy add"
+    name=$(pick)
+    [[ -n $name ]] && connect "$name"
+    ;;
+  add) cmd_add ;;
+  rm) cmd_rm "${2:-}" ;;
+  edit)
+    ensure_file
+    exec nano "$SERVERS"
+    ;;
+  ls) cmd_ls ;;
+  -h | --help | help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)
+    if [[ -n $(find_entry "$1") ]]; then
+      connect "$1"
+    else
+      # Coincidencia parcial: si hay una sola, conecta; si hay varias, abre el selector filtrado
+      name=$(pick "$1")
+      [[ -n $name ]] || die "no hay servidores que coincidan con '$1'"
+      connect "$name"
+    fi
+    ;;
+esac
