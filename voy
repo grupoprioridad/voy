@@ -3,6 +3,7 @@
 #
 #   voy               elegir servidor con fzf y conectarse
 #   voy <nombre>      conectarse directo a ese servidor
+#   voy <nombre> -n   abrir una sesión tmux nueva (no la compartida "voy")
 #   voy add           agregar un servidor
 #   voy rm [nombre]   eliminar un servidor
 #   voy edit          abrir la lista en el editor
@@ -47,7 +48,7 @@ pick() {
 }
 
 connect() {
-  local entry target host port name
+  local entry target host port name tmux_cmd
   entry=$(find_entry "$1")
   [[ -n $entry ]] || die "no existe el servidor '$1' (usa: voy ls)"
   name=$(awk '{print $1}' <<<"$entry")
@@ -56,11 +57,19 @@ connect() {
   port=22
   [[ $target == *:* ]] && port=${target##*:}
 
+  # Por defecto entra a la sesión tmux "voy" (la crea si no existe); con -n abre una nueva
+  if ((NEW_SESSION)); then
+    tmux_cmd="tmux new-session -s $SESSION-\$(date +%H%M%S)"
+    echo "→ $name ($host:$port) · sesión nueva"
+  else
+    tmux_cmd="tmux new-session -A -s $SESSION"
+    echo "→ $name ($host:$port)"
+  fi
+
   printf '\e]0;voy › %s\a' "$name"
-  echo "→ $name ($host:$port)"
-  # Entra a la sesión tmux "voy" (la crea si no existe); sin tmux, abre un shell normal
+  # Sin tmux en el servidor, abre un shell normal
   exec ssh -t -p "$port" "$host" \
-    "command -v tmux >/dev/null && exec tmux new-session -A -s $SESSION || { echo 'voy: tmux no está instalado en el servidor, abriendo shell normal'; exec \$SHELL -l; }"
+    "command -v tmux >/dev/null && exec $tmux_cmd || { echo 'voy: tmux no está instalado en el servidor, abriendo shell normal'; exec \$SHELL -l; }"
 }
 
 cmd_add() {
@@ -111,6 +120,17 @@ cmd_ls() {
   column -t -l 3 <<<"$list"
 }
 
+# -n en cualquier posición: sesión tmux nueva en vez de la compartida
+NEW_SESSION=0
+args=()
+for arg in "$@"; do
+  case $arg in
+    -n | --new) NEW_SESSION=1 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+set -- "${args[@]}"
+
 case "${1:-}" in
   "")
     [[ -n $(entries) ]] || die "no hay servidores, agrega uno con: voy add"
@@ -124,7 +144,7 @@ case "${1:-}" in
     exec nano "$SERVERS"
     ;;
   ls) cmd_ls ;;
-  -h | --help | help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help | help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)
     if [[ -n $(find_entry "$1") ]]; then
       connect "$1"

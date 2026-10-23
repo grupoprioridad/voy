@@ -7,6 +7,7 @@ Conexiones SSH rápidas con sesión **tmux persistente**. Elige un servidor con 
 ```
 voy               elegir servidor con fzf y conectarse
 voy <nombre>      conectarse directo (acepta coincidencia parcial)
+voy <nombre> -n   abrir una sesión tmux nueva en vez de la compartida
 voy add           agregar un servidor (y copiar tu llave SSH)
 voy rm [nombre]   eliminar un servidor
 voy edit          abrir la lista en el editor
@@ -14,6 +15,8 @@ voy ls            listar servidores
 ```
 
 Al conectar, `voy` entra a la sesión tmux `voy` del servidor (la crea si no existe). Si el servidor no tiene tmux, abre un shell normal.
+
+Con `-n` (o `--new`) abre una sesión aparte, llamada `voy-HHMMSS`, para trabajar en paralelo sin mezclarse con la sesión `voy`. Para retomarla después, entra al servidor y usa `tmux attach -t voy-HHMMSS` (`tmux ls` las lista).
 
 ## Instalación
 
